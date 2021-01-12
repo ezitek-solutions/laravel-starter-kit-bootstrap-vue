@@ -4,6 +4,7 @@ namespace App\Services;
 
 use Schema;
 use Carbon\Carbon;
+use App\Models\Model;
 
 abstract class Service
 {
@@ -19,7 +20,7 @@ abstract class Service
      *
      * @var bool
      */
-    protected $showWithRelations = true;
+    protected $load_with_relations = true;
 
 
     /**
@@ -27,7 +28,7 @@ abstract class Service
      *
      * @var bool
      */
-    protected $pagination = 20;
+    protected const PER_PAGE = 20;
 
 
     /**
@@ -65,7 +66,7 @@ abstract class Service
         $params = $this->getQueryParams($data);
 
         /* New implementations of show with relations */
-        if ($this->showWithRelations) {
+        if ($this->load_with_relations) {
             if (isset($data['exempted_relations'])) {
                 $exempted = explode(',', $data['exempted_relations']);
 
@@ -111,7 +112,7 @@ abstract class Service
         // Add default ordering fields
         $defaultOrderings = [];
 
-        if ($field = $this->model()->name_field) {
+        if ($field = $this->model()->getPrimaryKey()) {
             $defaultOrderings[$field] = 'ASC';
         }
 
@@ -131,7 +132,7 @@ abstract class Service
             }
         }
 
-        if (isset($params['paginate'])) {
+        if ($this->shouldPaginate($params['paginate'])) {
             $results = $query->paginate($params['paginate']);
         } else {
             $results = $query->get();
@@ -140,16 +141,15 @@ abstract class Service
         return $results;
     }
 
-
     /**
-     * Tells if a model has a particular relationship
+     * Tells if a model has a particular relation
      *
-     * @param string $relationship
-     * @return boolean
+     * @param string $relation
+     * @return bool
      */
-    public function hasRelationship($relationship)
+    protected function hasRelation($relation): bool
     {
-        return method_exists($this->model(), $relationship);
+        return method_exists($this->model(), $relation);
     }
 
     /**
@@ -158,7 +158,7 @@ abstract class Service
      * @param array $data
      * @return \App\Models\Model|null
      */
-    public function store($data = [])
+    public function store($data = []): Model
     {
         $data = $this->getPreparedSaveData($data);
 
@@ -174,12 +174,12 @@ abstract class Service
 
     /**
      * Show the specified resource. Load it with or without its relations
-     * depending on the value of the showWithRelations variable.
+     * depending on the value of the load_with_relations variable.
      *
      * @param int $id
      * @return \App\Models\Model|null
      */
-    public function show($id)
+    public function show($id): ?Model
     {
         $resource = $this->find($id);
 
@@ -187,7 +187,7 @@ abstract class Service
             return null;
         }
 
-        return $this->showWithRelations() ? $resource->load($this->relations) : $resource;
+        return $this->load_with_relations() ? $resource->load($this->relations) : $resource;
     }
 
     /**
@@ -198,7 +198,7 @@ abstract class Service
      * @param array $data
      * @return \App\Models\Model|null
      */
-    public function update($id, $data = [])
+    public function update($id, $data = []): Model
     {
         $resource = $this->find($id, $this->model::getPrimaryKey());
         $data = $this->getPreparedUpdateData($data, $resource);
@@ -222,15 +222,11 @@ abstract class Service
      * @param int $id
      * @return bool
      */
-    public function delete($id)
+    public function delete($id): bool
     {
         $resource = $this->find($id, $this->model::getPrimaryKey());
 
-        if ($resource && $resource->delete()) {
-            return true;
-        }
-
-        return false;
+        return $resource && $resource->delete();
     }
 
     /**
@@ -239,7 +235,7 @@ abstract class Service
      * @param int $id Id of resource
      * @return mixed Resource
      */
-    public function restore($id)
+    public function restore($id): Model
     {
         $resource = $this->find($id, 'id', true);
 
@@ -259,7 +255,7 @@ abstract class Service
      * @param string $column
      * @return \App\Models\Model|null
      */
-    public function find($value, $column = null, $withTrashed = false)
+    public function find($value, $column = null, $withTrashed = false): Model
     {
         $column = $column ?? $this->model::getPrimaryKey();
 
@@ -281,7 +277,7 @@ abstract class Service
      *
      * @return \App\Models\Model|null
      */
-    public function model()
+    public function model(): Model
     {
         return $this->model ? new $this->model : null;
     }
@@ -293,7 +289,7 @@ abstract class Service
      * @param array $data
      * @return array
      */
-    protected function getValidData($data = [])
+    protected function getValidData($data = []): array
     {
         $validData = [];
 
@@ -313,9 +309,9 @@ abstract class Service
      *
      * @return bool
      */
-    public function showWithRelations()
+    public function loadWithRelations(): bool
     {
-        return $this->showWithRelations;
+        return $this->load_with_relations;
     }
 
     /**
@@ -324,7 +320,7 @@ abstract class Service
      *      *
      * @return string
      */
-    protected function getRanking($ranking)
+    protected function getRanking($ranking): string
     {
         return strtolower($ranking) === 'desc' ? 'desc' : 'asc';
     }
@@ -335,10 +331,9 @@ abstract class Service
      * @param bool|string $paginate
      * @return bool
      */
-    protected function shouldPaginate($paginate = false)
+    protected function shouldPaginate($paginate = false): bool
     {
-        return (is_string($paginate) && strtolower($paginate) === 'false') || !$paginate
-                ? false : true;
+        return (is_string($paginate) && strtolower($paginate) === 'true') || $paginate === true;
     }
 
     /**
@@ -347,11 +342,9 @@ abstract class Service
      * @param int|string $per_page
      * @return int
      */
-    protected function getPerPage($per_page = 0)
+    protected function getPerPage($per_page = 20): int
     {
-        $per_page = intval($per_page);
-
-        return is_int($per_page) ? $per_page : 20;
+        return is_int($per_page) ? $per_page : static::PER_PAGE;
     }
 
     /**
@@ -361,7 +354,7 @@ abstract class Service
      * @param string $field
      * @return bool
      */
-    protected function tableHasColumn($column)
+    protected function tableHasColumn($column): bool
     {
         $table = $this->model()->getTable();
 
@@ -402,9 +395,7 @@ abstract class Service
 
         // Set pagination options
         if (isset($requestData['paginate']) && ($requestData['paginate'] === true || $requestData['paginate'] === 'true')) {
-            $pagination = (isset($requestData['per_page']) && $requestData['per_page']) ?
-                $requestData['per_page'] : $this->pagination;
-            $params['paginate'] = $pagination;
+            $params['paginate'] = $this->getPerPage(array_get($requestData, 'per_page'));
         }
 
         // Set ordering options
@@ -478,72 +469,14 @@ abstract class Service
     }
 
     /**
-     * A filter for querying name with a search
-     *
-     * @param \Illuminate\Database\QueryBuilder $query Current query builder
-     * @param $data Data from request
-     * @return \Illuminate\Database\QueryBuilder $query Updated query
-     */
-    public function searchColumn($query, $keyword, $column)
-    {
-        $keyword = preg_replace('/\s+/', ' ', trim($keyword));
-        $keywordParts = explode(" ", $keyword);
-
-        $query = $query->where(function ($query) use ($column, $keywordParts) {
-            if (count($keywordParts)) {
-                $query = $query->orWhere(function ($query) use ($keywordParts, $column) {
-                    foreach ($keywordParts as $part) {
-                        $query = $query->orWhere($column, 'LIKE', '%'.$part.'%');
-                    }
-                });
-            }
-        });
-
-        return $query;
-    }
-
-    /**
-     * Filter resources by those created within given date range
-     *
-     * @param \Illuminate\Database\Query\Builder $query The current built query
-     * @param string $start Start date to query from
-     * @param string $end End date to query from
-     * @return \Illuminate\Database\Query\Builder $query The updated query
-     */
-    public function filterByDate($query, $start, $end)
-    {
-        if ($start) {
-            $start = Carbon::parse($start)->toDateString() . ' 00:00:00';
-        } else {
-            $start = null;
-        }
-
-        if ($end) {
-            $end = Carbon::parse($end)->toDateString() . ' 23:59:00';
-        } else {
-            $end = null;
-        }
-
-        if ($start) {
-            $query = $query->where('created_at', '>=', $start);
-        }
-
-        if ($end) {
-            $query = $query->where('created_at', '<=', $end);
-        }
-
-        return $query;
-    }
-
-    /**
      * Do further querying on the current query object
      * Will be overriden by service classes with more complicated filtering requirements
      *
-     * @param \Illuminate\Database\Builder $query
+     * @param \Illuminate\Database\Query\Builder $query
      * @param array $data Data for filtering query
-     * @param \Illuminate\Database\Builder
+     * @param \Illuminate\Database\Query\Builder
      */
-    public function applyFilters($query, $data)
+    public function applyFilters($query, $data): \Illuminate\Database\Query\Builder
     {
         // Add search filter if keyword is present
         if (isset($data['keyword']) && $data['keyword']) {
@@ -554,104 +487,32 @@ abstract class Service
     }
 
     /**
-     * Handle upload of executive photos
-     *
-     * @param App\Models\Model Resource whose photo we are saving
-     * @param array $data Data for adding a new executive
-     * @param string $folder Folder to save image in
-     */
-    public function handlePhotoUpload($resource, $data, $folder)
-    {
-        $destination = "";
-
-        if (isset($data['photo']) && is_file($data['photo'])) {
-            $destination = $this->uploadImage($resource, $data['photo'], $folder);
-
-            if ($destination) {
-                $resource->photo = $destination;
-                $resource->save();
-            }
-        }
-    }
-
-    /**
-     * Upload executive's photo
-     *
-     * @param App\Models\Model $resource Resource whose photo we are saving
-     * @param object $uploadedFile Uploaded file object
-     * @param string $folder Folder to save image in
-     */
-    public function uploadImage($resource, $uploadedFile, $folder)
-    {
-        $file = new FileUploadUtility($uploadedFile);
-
-        if ($resource->photo) {
-            @unlink(storage_path('app/'. $resource->getOriginal('photo')));
-        }
-
-        $name = $folder . "_" . $resource->id . time();
-        $destination = $file->move($folder, $name, 'jpg');
-
-        return $destination;
-    }
-
-    /**
-     * Can the resource be deleted.
-     *
-     * @param int $id
-     * @return bool
-     */
-    public function canDelete($id)
-    {
-        $resource = $this->find($id);
-
-        if (!$resource) {
-            return null;
-        }
-
-        return $resource->canDelete();
-    }
-
-
-    /**
-     * Enables the service to fetch data with relations
+     * Loads record(s) with relations
      *
      * @param array $relations
-     * @return \App\Modules\Generic\Service\AbstractService
+     * @return \App\Services\Service
      */
-    public function enableWithRelationships($relations = [])
+    public function withRelations($relations = []): Service
     {
-        if (count($relations)) {
+        if ($relations) {
             $this->relations = $relations;
         }
 
-        $this->showWithRelations = true;
-
-        return $this;
-    }
-
-
-    /**
-     * Disables service to fetch resource with relations and resets the relations to model's relations
-     *
-     * @return void
-     */
-    public function disableWithRelationships()
-    {
-        $this->relations = $this->model() ? $this->model()->getRelations() : [];
-        $this->showWithRelations = false;
+        $this->load_with_relations = true;
 
         return $this;
     }
 
     /**
-     * Set relations when
+     * Load record(s) with no relations
      *
-     * @param array $relations Relations that can be loaded with model
+     * @return \App\Services\Service
      */
-    public function setRelations($relations)
+    public function withNoRelations(): Service
     {
-        $this->relations = $relations;
+        $this->load_with_relations = false;
+
+        return $this;
     }
 
     /**
@@ -659,39 +520,8 @@ abstract class Service
      *
      * @return array
      */
-    public function getRelations()
+    public function getRelations(): array
     {
         return $this->relations;
-    }
-
-    /**
-     * A filter for querying name with a keyword on relationships
-     *
-     * @param \Illuminate\Database\QueryBuilder $query
-     * @param string $keyword
-     * @param string $relationship
-     * @param array $fields
-     * @return \Illuminate\Database\QueryBuilder
-     */
-    public function otherSearchOnRelationship($query, $keyword, $relationship, $fields = [])
-    {
-        $keyword = preg_replace('/\s+/', ' ', trim($keyword));
-        $keywordParts = explode(" ", $keyword);
-
-        if (count($keywordParts)) {
-            $query->orWhereHas($relationship, function ($query) use ($fields, $keywordParts) {
-                $query = $query->where(function ($query) use ($fields, $keywordParts) {
-                    foreach ($fields as $field) {
-                        $query = $query->orWhere(function ($query) use ($keywordParts, $field) {
-                            foreach ($keywordParts as $part) {
-                                $query = $query->where($field, 'LIKE', '%'.$part.'%');
-                            }
-                        });
-                    }
-                });
-            });
-        }
-
-        return $query;
     }
 }
